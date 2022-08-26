@@ -1,0 +1,586 @@
+format long
+clearvars
+
+%%
+
+%Initialising the data for each real estate company
+Allvalues=readmatrix("values3.xlsx","Sheet","All");
+
+%Initialising the initial values for the forecast
+pred=zeros(220,8);
+pred(1,1)=Allvalues(924,2);
+pred(1,2)=Allvalues(924,3);
+pred(1,3)=Allvalues(924,4);
+pred(1,4)=Allvalues(924,5);
+pred(1,5)=Allvalues(924,6);
+pred(1,6)=Allvalues(924,7);
+pred(1,7)=Allvalues(924,8);
+pred(1,8)=Allvalues(924,9);
+
+
+%Initialising a single matrix for all stock price values
+fin_mat=zeros(924,8);
+fin_mat(1:924,1)=Allvalues(1:924,2);
+fin_mat(1:924,2)=Allvalues(1:924,3);
+fin_mat(1:924,3)=Allvalues(1:924,4);
+fin_mat(1:924,4)=Allvalues(1:924,5);
+fin_mat(1:924,5)=Allvalues(1:924,6);
+fin_mat(1:924,6)=Allvalues(1:924,7);
+fin_mat(1:924,7)=Allvalues(1:924,8);
+fin_mat(1:924,8)=Allvalues(1:924,9);
+
+%%
+
+actual_response=zeros(220,8);
+actual_response(1:220,1)=Allvalues(924:1143,2);
+actual_response(1:220,2)=Allvalues(924:1143,3);
+actual_response(1:220,3)=Allvalues(924:1143,4);
+actual_response(1:220,4)=Allvalues(924:1143,5);
+actual_response(1:220,5)=Allvalues(924:1143,6);
+actual_response(1:220,6)=Allvalues(924:1143,7);
+actual_response(1:220,7)=Allvalues(924:1143,8);
+actual_response(1:220,8)=Allvalues(924:1143,9);
+
+%%
+
+%Initialising the adjacency matrix
+adj=zeros(8,8);
+
+for i=1:8
+    for j=1:8
+        alpha=corrcoef(fin_mat(1:924,i),fin_mat(1:924,j));
+        adj(i,j)=alpha(1,2);
+    end
+end
+for i=1:3
+    alpha=corrcoef(fin_mat(1:924,4),fin_mat(1:924,i));
+    adj(4,i)=alpha(1,2);
+    adj(i,4)=alpha(1,2);
+end
+for i=5:8
+    alpha=corrcoef(fin_mat(1:924,4),fin_mat(1:924,i));
+    adj(4,i)=alpha(1,2);
+    adj(i,4)=alpha(1,2);
+end
+
+%%
+% Initialising strictly positive adjacency matrix
+pos_adj=zeros(8,8);
+for i=1:8
+    for j=1:8
+        if adj(i,j)>=0
+        %ensure no negative probabilities
+            pos_adj(i,j)=(adj(i,j));
+        end
+    end
+end
+%% Section for lack of adjacency
+independency=zeros(8,1);
+for i=1:8
+    independency(i)=sum(abs(adj(1:8,i)))-1;
+end
+ind_std=std(independency(1:8));
+ind_mean=mean(independency(1:8));
+
+% Initialising simulation plots
+sim_study_1=zeros(25200,32);
+pred_plot=zeros(25200,8);
+count=1;
+
+%% Volatility 
+for i=1:924
+    Evergrande_returns(i)=log(Allvalues(i+1,2)/Allvalues(i,2));
+    Kaisa_returns(i)=log(Allvalues(i+1,3)/Allvalues(i,3));
+    Randf_returns(i)=log(Allvalues(i+1,4)/Allvalues(i,4));
+    Fortune_returns(i)=log(Allvalues(i+1,5)/Allvalues(i,5));
+    Jianye_returns(i)=log(Allvalues(i+1,6)/Allvalues(i,6));
+    Everbright_returns(i)=log(Allvalues(i+1,7)/Allvalues(i,7));
+    Greenland_returns(i)=log(Allvalues(i+1,8)/Allvalues(i,8));
+    Zall_returns(i)=log(Allvalues(i+1,9)/Allvalues(i,9));
+end
+
+mu_returns=zeros(8,1);
+daily_vol_vec(1)=std(Evergrande_returns);
+mu_returns(1)=sum(Evergrande_returns)/924;
+daily_vol_vec(2)=std(Kaisa_returns);
+mu_returns(2)=sum(Kaisa_returns)/924;
+daily_vol_vec(3)=std(Randf_returns);
+mu_returns(3)=sum(Randf_returns)/924;
+daily_vol_vec(4)=std(Fortune_returns);
+mu_returns(4)=sum(Fortune_returns)/924;
+daily_vol_vec(5)=std(Jianye_returns);
+mu_returns(5)=sum(Jianye_returns)/924;
+daily_vol_vec(6)=std(Everbright_returns);
+mu_returns(6)=sum(Everbright_returns)/924;
+daily_vol_vec(7)=std(Greenland_returns);
+mu_returns(7)=sum(Greenland_returns)/924;
+daily_vol_vec(8)=std(Zall_returns);
+mu_returns(8)=sum(Zall_returns)/924;
+
+
+%% Simulations
+for g=1:100
+    %======================================================================
+    % Initialising state vectors and state initial values for each simulation
+    inf_vec=[1;0;0;0;0;0;0;0;];
+    S=zeros(220,1);
+    I=zeros(220,1);
+    R=zeros(220,1);
+    D=zeros(220,1);
+    I(1)=sum(inf_vec,'all');
+    R(1)=0;
+    S(1)=10-I(1)-R(1);
+    D(1)=0;
+
+    rec_vec=zeros(8,1);
+    dec_vec=zeros(8,1);    
+    inf_adj=zeros(8,1);
+
+    %======================================================================
+    %% Forecast
+    for t=1:219
+        %% Infection
+        % calculate infected probabilities unaffected by if its already infected
+        inf_prob=pos_adj*inf_vec;
+        for i=1:8
+            if inf_vec(i)==1
+                inf_prob(i)=inf_prob(i)-1;
+            end
+        end
+        % scale them to [0,1]
+        lambda=1/sum(inf_vec(1:8));
+        inf_prob=inf_prob*lambda;
+        for i=1:8
+            x=(rand)*3;
+            if inf_vec(i)==0
+                if inf_prob(i)>=x
+                    inf_vec(i)=1;
+                end
+                if inf_prob(i)<x
+                    inf_vec(i)=0;
+                end  
+            end
+        end
+
+%==========================================================================
+        %% Recovery
+        % vector for adjacency to infected and not infected nodes
+        rec_adj=inf_vec;
+        if inf_vec(i)==0
+            rec_adj(i)=-1;
+        end
+        rec_prob=pos_adj*rec_adj;
+        % only the infected nodes can recover
+        for i=1:8
+            if inf_vec(i)==0
+                rec_prob(i)=0;
+            end
+        end
+        % scale for [0,1]
+        rec_prob=rec_prob*0.05;
+        for i=1:8
+            y=(rand)*3;
+            if rec_prob(i)>=y
+                rec_prob(i)=1;
+            end
+            if rec_prob(i)<y
+                rec_prob(i)=0;
+            end
+            if rec_vec(i)==0
+                rec_vec(i)=rec_prob(i);
+            end
+        end
+        inf=inf_vec-rec_vec-dec_vec;
+        rec=sum(rec_vec)-sum(dec_vec);
+        if rec<0
+            rec=0;
+        end
+
+%% Section for changing the price of the stock to inform the deceased category
+
+        inf_adj=adj*inf;
+        for i=1:8
+            if inf(i)==1
+                inf_adj(i)=inf_adj(i)-1;
+            end
+        end
+
+        %if infected then we alter the probability of w being lower
+        for i=1:8
+            inf_adj(i)=inf_adj(i)*0.0005;
+        end
+        dec_bounds=zeros(8,1);
+        gamma=zeros(1,8);
+        for i=1:8
+            if inf(i)==1
+                w=(randn)-0.25;
+                gamma(i)=exp((w*(daily_vol_vec(i)+mu_returns(i))));
+                gamma(i)=gamma(i)*(1-inf_adj(i));
+                pred(t+1,i)=pred(t,i)*(gamma(i));
+            end
+            if inf(i)==0
+                w=randn;
+                gamma(i)=exp((w*(daily_vol_vec(i)+mu_returns(i))));
+                gamma(i)=gamma(i)*((1-inf_adj(i)));
+                pred(t+1,i)=pred(t,i)*(gamma(i));
+            end
+            if dec_vec(i)==1
+                w=randn-0.5;
+                gamma(i)=exp((w*(daily_vol_vec(i)+mu_returns(i))));
+                gamma(i)=gamma(i)*(1-inf_adj(i));
+                pred(t+1,i)=pred(t,i)*(gamma(i));
+            end
+            if independency(i)<=ind_mean-ind_std
+                w=randn-0.25;
+                gamma(i)=exp((w*(daily_vol_vec(i)+mu_returns(i))));
+                gamma(i)=gamma(i)*(1-inf_adj(i));
+                pred(t+1,i)=pred(t+1,i)*(gamma(i));
+            end
+            if independency(i)>=ind_mean+ind_std
+                w=randn-0.25;
+                gamma(i)=exp((w*(daily_vol_vec(i)+mu_returns(i))));
+                gamma(i)=gamma(i)*(1-inf_adj(i));
+                pred(t+1,i)=pred(t+1,i)*(gamma(i));
+            end
+        
+            dec_bounds(i)=0.25*mean(fin_mat(804:924,i));
+            if pred(t+1,i)<=dec_bounds(i)
+                dec_vec(i)=1;
+            end
+            if dec_vec(i)>0
+                dec_vec(i)=1;
+                rec_vec(i)=0;
+                inf(i)=0;
+                inf_vec(i)=1;
+            end
+        end
+
+%==========================================================================
+        I(t+1) = sum(inf);
+        S(t+1) = 8 - sum(inf_vec);
+        R(t+1) = rec;
+        D(t+1) = sum(dec_vec);
+
+        for i=1:8
+            sim_study_1(count+1,i)=1-inf_vec(i);
+            sim_study_1(count+1,i+8)=inf(i);
+            sim_study_1(count+1,i+16)=rec_vec(i);
+            sim_study_1(count+1,i+24)=dec_vec(i);
+        end
+
+        for n=0:99
+            sim_study_1((220*(n))+1,1:8)=[0;1;1;1;1;1;1;1;];
+            sim_study_1((220*(n))+1,9:16)=[1;0;0;0;0;0;0;0;];
+            sim_study_1((220*(n))+1,17:24)=[0;0;0;0;0;0;0;0;];
+            sim_study_1((220*(n))+1,25:32)=[0;0;0;0;0;0;0;0;];
+        end
+
+        sim_study_1(1,1:8)=[0;1;1;1;1;1;1;1;];
+        sim_study_1(1,9:16)=[1;0;0;0;0;0;0;0;];
+        sim_study_1(1,17:24)=[0;0;0;0;0;0;0;0;];
+        sim_study_1(1,25:32)=[0;0;0;0;0;0;0;0;];
+
+        count=count+1;
+    end
+    count=count+1;
+    for i=1:220
+        for j=1:8
+            pred_plot((220*(g-1))+i,j)=pred(i,j);
+        end
+    end
+    pred_means=zeros(220,8);
+    for i=1:220
+        for j=1:8
+            pred_means(i,j)=sum(pred_plot(i:220:21780+i,j))*(1/100);
+        end
+    end
+end
+%% simulation study 2
+
+sim_study_1_results=zeros(220,32);
+for i=1:220
+    for j=1:32
+        for k=0:99
+            sim_study_1_results(i,j)=sim_study_1_results(i,j)+sim_study_1(i+(220*k),j);
+        end
+    end
+end
+
+sim_study_2_sus=zeros(220,1);
+sim_study_2_inf=zeros(220,1);
+sim_study_2_rec=zeros(220,1);
+sim_study_2_dec=zeros(220,1);
+
+for i=1:220
+    sim_study_2_sus(i)=sum(sim_study_1_results(i,1:8))*(1/100);
+    sim_study_2_inf(i)=sum(sim_study_1_results(i,9:16))*(1/100);
+    sim_study_2_rec(i)=sum(sim_study_1_results(i,17:24))*(1/100);
+    sim_study_2_dec(i)=sum(sim_study_1_results(i,25:32))*(1/100);
+end
+
+fin_sus=zeros(220,8);
+fin_inf=zeros(220,8);
+fin_rec=zeros(220,8);
+fin_dec=zeros(220,8);
+
+for i=1:220
+    for j=1:8
+        fin_sus(i,j)=(sim_study_1_results(i,j))*(1/100);
+        fin_inf(i,j)=(sim_study_1_results(i,j+8))*(1/100);
+        fin_rec(i,j)=(sim_study_1_results(i,j+16))*(1/100);
+        fin_dec(i,j)=(sim_study_1_results(i,j+24))*(1/100);
+    end
+end
+
+%% confidence intervals
+conf_ints=zeros(22000,5);
+for i=1:22000
+    conf_ints(i,1)=sum(sim_study_1(i,1:8));
+    conf_ints(i,2)=sum(sim_study_1(i,9:16));
+    conf_ints(i,3)=sum(sim_study_1(i,17:24));
+    conf_ints(i,4)=sum(sim_study_1(i,25:32));
+    conf_ints(i,5)=sum(conf_ints(i,1:4));
+end
+conf_ints_means=zeros(220,4);
+for i=1:4
+    for j=1:220
+        conf_ints_means(j,i)=sum(conf_ints(j:220:j+21780,i))*(1/100);
+    end
+end
+std_conf=zeros(220,4);
+fin_conf_int=zeros(220,8);
+for i=1:220
+    for j=1:4
+        std_conf(i,j)=std(conf_ints(i:220:i+21780,j));
+        fin_conf_int(i,j)=conf_ints_means(i,j)+1.96*(std_conf(i,j))*0.1;
+        fin_conf_int(i,j+4)=conf_ints_means(i,j)-1.96*(std_conf(i,j))*0.1;
+    end
+end
+sus_conf_plus=zeros(1,220);
+sus_conf_minus=zeros(1,220);
+inf_conf_plus=zeros(1,220);
+inf_conf_minus=zeros(1,220);
+rec_conf_plus=zeros(1,220);
+rec_conf_minus=zeros(1,220);
+dec_conf_plus=zeros(1,220);
+dec_conf_minus=zeros(1,220);
+for i=1:220
+    sus_conf_plus(i)=fin_conf_int(i,1);
+    sus_conf_minus(i)=fin_conf_int(i,5);
+    inf_conf_plus(i)=fin_conf_int(i,2);
+    inf_conf_minus(i)=fin_conf_int(i,6);
+    rec_conf_plus(i)=fin_conf_int(i,3);
+    rec_conf_minus(i)=fin_conf_int(i,7);
+    dec_conf_plus(i)=fin_conf_int(i,4);
+    dec_conf_minus(i)=fin_conf_int(i,8);
+end
+
+%%
+rmsd_vec=zeros(1,8);
+mean_error_vec=zeros(1,8);
+diff_vec=zeros(220,8);
+for i=1:8
+    for j=1:220
+        diff_vec(j,i)=(actual_response(j,i)-pred_means(j,i))/actual_response(i);
+    end
+end
+for i=1:8
+    rmsd_vec(i)=sqrt((sum((diff_vec(1:220,i).^2)))/220);
+end
+for i=1:8
+    mean_error_vec(i)=((sum((diff_vec(1:220,i))))/220);
+end
+important_number=sum(rmsd_vec(1:8))/8;
+erdnum=mean(mean_error_vec(1:8));
+%%
+
+%% plot 1
+figure(1)
+t=1:220;
+greycolour=[.8,.8,.8];
+plot(t,sim_study_2_sus,'r', 'Linewidth', 1.5)
+hold on
+plot(t,sim_study_2_inf,'g', 'Linewidth',1.5)
+plot(t,sim_study_2_rec,'b', 'Linewidth',1.5)
+plot(t,sim_study_2_dec,'y', 'Linewidth',1.5)
+patch([t fliplr(t)], [sus_conf_plus fliplr(sus_conf_minus)], greycolour, 'FaceAlpha',0.5, 'EdgeColor','none')
+patch([t fliplr(t)], [inf_conf_plus fliplr(inf_conf_minus)], greycolour, 'FaceAlpha',0.5, 'EdgeColor','none')
+patch([t fliplr(t)], [rec_conf_plus fliplr(rec_conf_minus)], greycolour, 'FaceAlpha',0.5, 'EdgeColor','none')
+patch([t fliplr(t)], [dec_conf_plus fliplr(dec_conf_minus)], greycolour, 'FaceAlpha',0.5, 'EdgeColor','none')
+legend('Susceptible','Infected','Recovered','Deceased')
+title("Category Dynamics of the S-I-R-D model")
+hold off
+
+%% plot 2
+figure(2)
+plot(t,pred(1:220,1),t,pred(1:220,2),t,pred(1:220,3),t, ...
+       pred(1:220,4),t,pred(1:220,5),t,pred(1:220,6),t, ...
+       pred(1:220,7),t,pred(1:220,8));
+
+%% plot 3
+figure(3)
+hold on
+plot(t,pred_means(1:220,1),'Color','#A2142F','LineWidth',1.5)
+plot(t,pred_means(1:220,2),'Color','#0072BD','LineWidth',1.5)
+plot(t,pred_means(1:220,3),'Color','#7E2F8E','LineWidth',1.5)
+plot(t,pred_means(1:220,4),'Color','#D95319','LineWidth',1.5)
+plot(t,pred_means(1:220,5),'--','Color','#A2142F','LineWidth',1.5)
+plot(t,pred_means(1:220,6),'--','Color','#0072BD','LineWidth',1.5)
+plot(t,pred_means(1:220,7),'--','Color','#7E2F8E','LineWidth',1.5)
+plot(t,pred_means(1:220,8),'--','Color','#D95319','LineWidth',1.5)
+legend('Evergrande','Kaisa','R&F','China Fortune','Central China','Everbright','Greenland','Wuhan Zall')
+title("Time-Series forecast of the S-I-R-D model")
+hold off
+
+%%
+
+teams_vect_a=[24,34,17,15,6,24,17,10];
+teams_vect_b=[29.4,32,28,24,21,17,3,11];
+teamsadj_a=zeros(8,8);
+teamsadj_b=zeros(8,8);
+for i=1:8
+    for j=1:8
+        teamsadj_a(i,j)=abs(teams_vect_a(i)-teams_vect_a(j));
+        teamsadj_a(i,j)=(teamsadj_a(i,j)/34)-1;
+        teamsadj_b(i,j)=abs(teams_vect_b(i)-teams_vect_b(j));
+        teamsadj_b(i,j)=(teamsadj_b(i,j)/34)-1;
+    end
+end
+%%
+n=8;
+sched =[mod([reshape([2:n/2;n-1:-1:n/2+1],1,n-2),1]+(-1:n-3)',n-1)+1,n*(ones(n-1,1))];
+fullschedule=zeros(14,8);
+fullschedule(1:7,1:8)=sched(1:7,1:8);
+fullschedule(8:14,1:8)=sched(1:7,1:8);
+%%
+ownershipvector_a=[0,0.5671,0.9,1,1,0,0.7,0];
+ownershipvector_b=[0,0,0,1,0.5907,1,0,0];
+spillovereffect=zeros(15,8);
+for i=1:15
+    for j=1:8
+        spillovereffect(i,j)=sim_study_1_results((14*(i-1))+1,j+8)+(2*sim_study_1_results(((i-1)*14)+1,j+24));
+        spillovereffect(i,j)=spillovereffect(i,j)/200;
+    end
+end
+multiplier_a=zeros(14,8);
+multiplier_b=zeros(14,8);
+for i=1:15
+    multiplier_a(i,2)=spillovereffect(i,1)*ownershipvector_a(2);
+    multiplier_a(i,3)=spillovereffect(i,2)*ownershipvector_a(3);
+    multiplier_a(i,4)=spillovereffect(i,3)*ownershipvector_a(4);
+    multiplier_a(i,5)=spillovereffect(i,4)*ownershipvector_a(5);
+    multiplier_a(i,7)=spillovereffect(i,5)*ownershipvector_a(7);
+    multiplier_b(i,4)=spillovereffect(i,6)*ownershipvector_b(4);
+    multiplier_b(i,5)=spillovereffect(i,7)*ownershipvector_b(5);
+    multiplier_b(i,6)=spillovereffect(i,8)*ownershipvector_b(6);
+end
+%%
+for i=1:14
+    for j=1:8
+        multiplier_a(i,j)=1-multiplier_a(i,j);
+        multiplier_b(i,j)=1-multiplier_b(i,j);
+    end
+end
+%%
+%every 16 days well multiply
+points_a=zeros(1500,8);
+points_b=zeros(1500,8);
+count=2;
+for sim=1:100
+    points_a(count,1:8)=[0,0,0,0,0,0,0,0];
+    points_b(count,1:8)=[0,0,0,0,0,0,0,0];
+    for t=1:14
+        for i=1:2:8
+            ratea=(multiplier_a(t,fullschedule(t,i))*(1/42)*teams_vect_a(fullschedule(t,i)));
+            rateb=(multiplier_a(t,fullschedule(t,i+1))*(1/42)*teams_vect_a(fullschedule(t,i+1)));
+            probbound=ratea/(ratea+rateb);
+            drawprob=(1-(1/34)*0.485*abs(teams_vect_a(fullschedule(t,i))-teams_vect_a(fullschedule(t,i+1))));
+            drawprob=drawprob*0.2425*0.5;
+            x=rand;
+            if x < probbound-drawprob
+                points_a(count,fullschedule(t,i+1))=points_a(count-1,fullschedule(t,i+1))+3;
+                points_a(count,fullschedule(t,i))=points_a(count-1,fullschedule(t,i));
+            end
+            if probbound-drawprob <= x && x <= probbound+drawprob
+                points_a(count,fullschedule(t,i))=points_a(count-1,fullschedule(t,i))+1;
+                points_a(count,fullschedule(t,i+1))=points_a(count-1,fullschedule(t,i+1))+1;
+            end
+            if probbound+drawprob < x
+                points_a(count,fullschedule(t,i))=points_a(count-1,fullschedule(t,i))+3;
+                points_a(count,fullschedule(t,i+1))=points_a(count-1,fullschedule(t,i+1));
+            end
+            ratea=(multiplier_b(t,fullschedule(t,i))*(1/42)*teams_vect_b(fullschedule(t,i)));
+            rateb=(multiplier_b(t,fullschedule(t,i+1))*(1/42)*teams_vect_b(fullschedule(t,i+1)));
+            probbound=ratea/(ratea+rateb);
+            drawprob=(1-(1/34)*0.485*abs(teams_vect_b(fullschedule(t,i))-teams_vect_b(fullschedule(t,i+1))));
+            drawprob=drawprob*0.2425*0.5;
+            x=rand;
+            if x < probbound-drawprob
+                points_b(count,fullschedule(t,i+1))=points_b(count-1,fullschedule(t,i+1))+3;
+                points_b(count,fullschedule(t,i))=points_b(count-1,fullschedule(t,i));
+            end
+            if probbound-drawprob <= x && x <= probbound+drawprob
+                points_b(count,fullschedule(t,i))=points_b(count-1,fullschedule(t,i))+1;
+                points_b(count,fullschedule(t,i+1))=points_b(count-1,fullschedule(t,i+1))+1;
+            end
+            if probbound+drawprob < x
+                points_b(count,fullschedule(t,i))=points_b(count-1,fullschedule(t,i))+3;
+                points_b(count,fullschedule(t,i+1))=points_b(count-1,fullschedule(t,i+1));
+            end
+        end
+        count=count+1;
+    end
+    count=count+1;
+end
+pointsmeans_a=zeros(15,8);
+pointsmeans_b=zeros(15,8);
+for i=1:15
+    for j=1:8
+        pointsmeans_a(i,j)=sum(points_a(i:15:1485+i,j))/100;
+        pointsmeans_b(i,j)=sum(points_b(i:15:1485+i,j))/100;
+    end
+end
+
+%%
+finalleague_vect_a=zeros(1,8);
+finalleague_vect_a=pointsmeans_a(15,1:8);
+finalleague_vect_b=zeros(1,8);
+finalleague_vect_b=pointsmeans_b(15,1:8);
+labelsa=categorical({'Shandong','Chongqing Lifan','Guangzhou','Shenzhen','Guangzhou City','Qingdao Huanghai','Shijiazhuang','Henan Jianye'});
+labelsa=reordercats(labelsa,{'Shandong','Chongqing Lifan','Guangzhou','Shenzhen','Guangzhou City','Qingdao Huanghai','Shijiazhuang','Henan Jianye'});
+
+labelsb=categorical({'Changchun','Shanghai Port','Beijing','Hebei CFFC','Shanghai','Wuhan Zall','Dalian Pro','Tianjin'});
+labelsb=reordercats(labelsb,{'Changchun','Shanghai Port','Beijing','Hebei CFFC','Shanghai','Wuhan Zall','Dalian Pro','Tianjin'});
+
+plot_a=sort(finalleague_vect_a,'descend');
+plot_b=sort(finalleague_vect_b,'descend');
+actuala=[33,11,30,24,21,10,7,18];
+plottinga=zeros(8,2);
+for i=1:8
+        plottinga(i,1)=plot_a(i);
+        plottinga(i,2)=actuala(i);
+end
+%%
+errora =zeros(8,1);
+errora = plot_a-actuala;
+%%
+
+actualb=[28,28,24,23,22,11,9,7];
+plottingb=zeros(8,2);
+for i=1:8
+        plottingb(i,1)=plot_b(i);
+        plottingb(i,2)=actualb(i);
+end
+%%
+errorb =zeros(8,1);
+errorb = plot_b-actualb;
+%%
+figure(4)
+bar(labelsa,plottinga,0.4)
+legend('Forecast','Actual')
+title('Forecast vs Actual 2021/2022 CSL Group A')
+
+figure(5)
+bar(labelsb,plottingb,0.4)
+legend('Forecast','Actual')
+title('Forecast vs Actual 2021/2022 CSL Group B')
